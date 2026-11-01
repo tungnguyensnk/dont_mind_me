@@ -1,10 +1,14 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
+logi() { :; }; logw() { :; }; loge() { :; }
+LOG_TAG=service
+[ -f "$MODDIR/log.sh" ] && . "$MODDIR/log.sh"
 
 decode_numbers() {
     printf '\143\157\155\056\166\156\151\144\n'
 }
-[ -f "$MODDIR/disable" ] && exit 0
+[ -f "$MODDIR/disable" ] && { logi "module disabled, skipping"; exit 0; }
+logi "service start"
 [ -f "$MODDIR/tricky/prop.sh" ] && sh "$MODDIR/tricky/prop.sh" &
 (
     cd "$MODDIR/tricky" || exit 1
@@ -22,6 +26,7 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 1; done
 # hide system crash report dialogs after boot
 settings put global hide_error_dialogs 1 >/dev/null 2>&1
 rm -f "$MODDIR/.booting"
+logi "boot completed; running post-boot tasks"
 
 # run the one-shot property spoof pass after boot
 [ -f "$MODDIR/spoof.conf" ] && sh "$MODDIR/spoof.sh"
@@ -40,6 +45,9 @@ if [ -x "$resetprop" ]; then
     for key in $(getprop | sed -n 's/^\[\([^]]*\)\]:.*$/\1/p' | grep -iE 'xiaomi\.eu|developerid|hypertn|eliterom|mipa|pulse|lineage|modversion'); do
         "$resetprop" -n -v -d "$key" 2>/dev/null
     done
+    logi "applied live resetprop build overrides"
+else
+    logw "resetprop not found; skipped live prop overrides"
 fi
 
 # hide rules cover the main app UID; add more package UIDs if its process model changes.
@@ -49,7 +57,8 @@ until cmd package list packages >/dev/null 2>&1; do sleep 1; done
 [ -f "$MODDIR/.notifyfix" ] && sh "$MODDIR/fixnotify.sh" apply
 
 uid=$(cmd package list packages -U "$(decode_numbers)" | sed -n "s/^package:$(decode_numbers) uid:\([0-9][0-9]*\)\$/\1/p" | head -n 1)
-[ -n "$uid" ] || exit 0
+[ -n "$uid" ] || { logi "target app not installed; no hide rules applied"; exit 0; }
+logi "applying hide rules for target uid=$uid"
 
 if [ -f "$MODDIR/clean_build.prop" ]; then
     "$nm" rule add --uid "$uid" /system/build.prop "$MODDIR/clean_build.prop"
@@ -61,3 +70,4 @@ for path in /system/addon.d $(find /system /product /system_ext /vendor \
         -prune -print 2>/dev/null); do
     [ -e "$path" ] && "$nm" rule add --whiteout "$path" --uid "$uid"
 done
+logi "service done"

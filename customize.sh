@@ -1,9 +1,21 @@
 SKIPUNZIP=0
-[ "$ARCH" = arm64 ] || abort "! arm64 only"
-[ "$API" -ge 29 ] || abort "! Android 10+ required"
-{ [ "$KSU" = true ] || [ "$APATCH" = true ]; } || abort "! KernelSU or APatch required"
-[ "$KSU" != true ] || [ "${KSU_VER_CODE:-0}" -ge 10670 ] || abort "! Please update KernelSU and KernelSU Manager"
-[ "$BOOTMODE" = true ] || abort "! Install from recovery is not supported"
+
+# --- logging --------------------------------------------------------------
+# step() shows a line in the installer AND records it; die() records then aborts.
+# install log lands at $MODPATH/install.log (i.e. the live module dir after reboot).
+logi() { :; }; logw() { :; }; loge() { :; }
+LOG_TAG=install
+LOGFILE="$MODPATH/install.log"
+[ -f "$MODPATH/log.sh" ] && . "$MODPATH/log.sh"
+step() { ui_print "- $1"; logi "$1"; }
+die()  { loge "$1"; abort "! $1"; }
+logi "install started (arch=$ARCH api=$API ksu=${KSU:-} apatch=${APATCH:-} ksu_ver=${KSU_VER_CODE:-})"
+
+[ "$ARCH" = arm64 ] || die "arm64 only"
+[ "$API" -ge 29 ] || die "Android 10+ required"
+{ [ "$KSU" = true ] || [ "$APATCH" = true ]; } || die "KernelSU or APatch required"
+[ "$KSU" != true ] || [ "${KSU_VER_CODE:-0}" -ge 10670 ] || die "update KernelSU and KernelSU Manager"
+[ "$BOOTMODE" = true ] || die "install from recovery is not supported"
 
 # conflicting modules (nomount, HMA, Tricky Store, PIF, ...) are auto-disabled below,
 # not aborted on — their functions are all bundled into this module now
@@ -19,34 +31,37 @@ if [ -z "$version" ] || grep -q '^nomount ' /proc/modules; then
     if [ -n "$kmi" ]; then
         ko="$MODPATH/lkm/nomount-$kmi-$kernel.ko"
     else
-        # SuSFS uname spoof can strip the androidXX KMI token; KernelSU still reports the
+        # a uname spoof can strip the androidXX KMI token; KernelSU still reports the
         # real KMI (e.g. "android16-6.12") which matches the bundled driver file name
         ko="$MODPATH/lkm/nomount-$(/data/adb/ksud boot-info current-kmi 2>/dev/null).ko"
     fi
-    # ponytail: only bundled arm64 KMI drivers; add a matching driver for new kernels.
-    [ -f "$ko" ] || abort "! Leave me alone! driver unavailable for this kernel"
+    logi "resolving nomount driver: kmi=${kmi:-?} kernel=$kernel -> $(basename "$ko")"
+    # only arm64 KMI drivers are bundled; add a matching driver file for a new kernel.
+    [ -f "$ko" ] || die "nomount driver unavailable for this kernel ($(basename "$ko"))"
     if [ -z "$version" ]; then
-        "$MODPATH/bin/lkmloader" "$ko" || abort "! Failed to load Leave me alone! driver"
+        "$MODPATH/bin/lkmloader" "$ko" || die "failed to load the nomount driver"
         version=$("$nm" version 2>/dev/null)
-        [ -n "$version" ] || abort "! Leave me alone! driver is not responding"
+        [ -n "$version" ] || die "nomount driver is not responding after load"
     else
-        ui_print "- Existing Leave me alone! kernel module detected; staging driver for reboot"
+        step "existing nomount kernel module detected; staging driver for reboot"
     fi
     current=$(printf '%s\n' "$version" | sed -n '1s/^\([0-9][0-9]*\).*/\1/p')
-    [ -n "$current" ] && [ "$current" -ge 22 ] || abort "! Leave me alone! driver v22+ required"
-    mv "$ko" "$MODPATH/lkm/nomount.ko" || abort "! Cannot stage driver for reboot"
+    [ -n "$current" ] && [ "$current" -ge 22 ] || die "nomount driver v22+ required (found ${current:-none})"
+    mv "$ko" "$MODPATH/lkm/nomount.ko" || die "cannot stage driver for reboot"
+    logi "nomount driver v$current staged for reboot"
 else
     current=$(printf '%s\n' "$version" | sed -n '1s/^\([0-9][0-9]*\).*/\1/p')
-    [ -n "$current" ] && [ "$current" -ge 22 ] || abort "! Leave me alone! driver v22+ required"
+    [ -n "$current" ] && [ "$current" -ge 22 ] || die "nomount driver v22+ required (found ${current:-none})"
     rm -rf "$MODPATH/lkm"
+    logi "nomount driver v$current already loaded"
 fi
 
 src=/system/build.prop
 [ -f "$src" ] || src=/system/system/build.prop
-[ -f "$src" ] || abort "! Cannot read system build.prop"
+[ -f "$src" ] || die "cannot read system build.prop"
 device=$(getprop ro.product.device)
 [ -n "$device" ] || device=$(getprop ro.product.name)
-case "$device" in ''|*[!a-zA-Z0-9._-]*) abort "! Invalid device name";; esac
+case "$device" in ''|*[!a-zA-Z0-9._-]*) die "invalid device name";; esac
 case "$(getprop ro.product.mod_device)" in
     *_in_global*) mod="${device}_in_global";;
     *_ru_global*) mod="${device}_ru_global";;
@@ -61,28 +76,32 @@ sed -e 's/^ro\.build\.host=.*/ro.build.host=c5-build-66.bj.xiaomi.com/' \
     -e '/# ADDED BY/d' -e '/MIUIOS\.CZ/d' -e '/MIUIPOLSKA\.PL/d' \
     -e '/^ro\.xiaomi\.developerid=/d' -e '/^ro\.xiaomi\.eu/d' \
     -e '/^ro\.\(tn\|hypertn\|eliterom\|mipa\|pulse\|lineage\|crdroid\)\./d' \
-    -e '/^ro\.modversion=/d' "$src" > "$MODPATH/clean_build.prop" || abort "! Cannot build clean property file"
+    -e '/^ro\.modversion=/d' "$src" > "$MODPATH/clean_build.prop" || die "cannot build clean property file"
 chmod 644 "$MODPATH/clean_build.prop"
 chcon u:object_r:system_file:s0 "$MODPATH/clean_build.prop" 2>/dev/null || true
 rm -f "$MODPATH"/lkm/nomount-android*.ko
+logi "clean build.prop built for device=$device mod_device=$mod (source $src)"
 
-mkdir -p /data/adb/tricky_store || abort "! Cannot create Tricky Store config directory"
+mkdir -p /data/adb/tricky_store || die "cannot create Tricky Store config directory"
 chmod 700 /data/adb/tricky_store
 for file in keybox.xml target.txt; do
     if [ ! -f "/data/adb/tricky_store/$file" ]; then
-        cp "$MODPATH/tricky/$file" "/data/adb/tricky_store/$file" || abort "! Cannot install $file"
+        cp "$MODPATH/tricky/$file" "/data/adb/tricky_store/$file" || die "cannot install $file"
         chmod 600 "/data/adb/tricky_store/$file"
+        logi "installed default tricky_store/$file"
     fi
 done
-mv "$MODPATH/tricky/lib/arm64-v8a/libTrickyStoreOSS.so" "$MODPATH/tricky/libTrickyStoreOSS.so" || abort "! Cannot install Tricky Store library"
-mv "$MODPATH/tricky/lib/arm64-v8a/libinject.so" "$MODPATH/tricky/inject" || abort "! Cannot install Tricky Store injector"
+mv "$MODPATH/tricky/lib/arm64-v8a/libTrickyStoreOSS.so" "$MODPATH/tricky/libTrickyStoreOSS.so" || die "cannot install Tricky Store library"
+mv "$MODPATH/tricky/lib/arm64-v8a/libinject.so" "$MODPATH/tricky/inject" || die "cannot install Tricky Store injector"
 rm -rf "$MODPATH/tricky/lib"
 chmod 755 "$MODPATH/tricky/daemon" "$MODPATH/tricky/inject" "$MODPATH/service.sh" "$MODPATH/uninstall.sh"
 
-mkdir -p /data/adb/boot-completed.d || abort "! Cannot create boot-completed.d"
-cp "$MODPATH/hma/hmaoss.sh" /data/adb/boot-completed.d/leave-me-alone-hma.sh || abort "! Cannot install HMA status updater"
-chmod 755 /data/adb/boot-completed.d/leave-me-alone-hma.sh
+mkdir -p /data/adb/boot-completed.d || die "cannot create boot-completed.d"
+rm -f /data/adb/boot-completed.d/leave-me-alone-hma.sh   # drop the legacy name from older installs
+cp "$MODPATH/hma/hmaoss.sh" /data/adb/boot-completed.d/dont-mind-me-hma.sh || die "cannot install HMA status updater"
+chmod 755 /data/adb/boot-completed.d/dont-mind-me-hma.sh
 cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
+logi "tricky store, injector and boot-completed HMA hook installed"
 
 # attestation patch must report the REAL firmware patch: GMS reads the real patch
 # (via the per-app lib) while the live property is spoofed forward for banking apps,
@@ -95,7 +114,10 @@ case "$realpatch" in
         printf 'system=%s\nboot=%s\nvendor=%s\n' "$realpatch" "$realpatch" "$realpatch" > /data/adb/tricky_store/security_patch.txt
         chmod 600 /data/adb/tricky_store/security_patch.txt
         rm -rf /data/adb/tricky_store/keys/* 2>/dev/null
-        ui_print "- Tricky attestation patch pinned to real $realpatch"
+        step "attestation patch pinned to firmware value $realpatch"
+        ;;
+    *)
+        logw "firmware security_patch unreadable or malformed ('${realpatch:-}'); left attestation patch untouched"
         ;;
 esac
 
@@ -110,6 +132,7 @@ chmod 755 "$MODPATH/fixnotify.sh"
 # gates it in); system_lib_file lets the app domain dlopen/mmap-execute it through /proc/self/fd
 chmod 644 "$MODPATH/gms/arm64-v8a/libgmsspoof.so"
 chcon u:object_r:system_lib_file:s0 "$MODPATH/gms/arm64-v8a/libgmsspoof.so" 2>/dev/null || true
+logi "spoof.conf, notification fix and GMS spoof library staged"
 
 # this module bundles nomount + HMA (incl OSS) + Tricky Store (incl OSS) + PIF + property
 # spoof + GMS patch, so auto-disable any separately installed copy to avoid slot/zygisk
@@ -122,7 +145,8 @@ for d in /data/adb/modules/*/; do
     mname=$(sed -n 's/^name=//p' "$d/module.prop")
     if printf '%s\n%s\n' "$mid" "$mname" | grep -qiE 'nomount|leave.?me.?alone|hide.?my.?app|hmaoss|hma[_-]|^hma$|tricky|playintegrit|^pif$|gms.?spoof|brene|tcb.?patch|duckusb'; then
         [ -f "$d/remove" ] && continue
-        touch "$d/disable" && ui_print "- disabled conflicting module: $mid (bundled into Don't mind me)"
+        touch "$d/disable" && step "disabled conflicting module: $mid"
     fi
 done
-ui_print "- Don't mind me v$current with HMA, Tricky Store, nomount, spoof + GMS patch staged"
+step "Don't mind me v$current staged (HMA, Tricky Store, nomount, spoof, GMS patch)"
+logi "install finished"

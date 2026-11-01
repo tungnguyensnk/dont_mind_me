@@ -3,10 +3,12 @@
 # can toggle them one at a time to find which ones an app actually needs. there is no
 # path/mount or ksu-dir hiding and no kernel feature use, so `adb shell su` stays intact.
 MODDIR=${0%/*}
+logi() { :; }; logw() { :; }; loge() { :; }
+LOG_TAG=spoof
+[ -f "$MODDIR/log.sh" ] && . "$MODDIR/log.sh"
 RESETPROP=/data/adb/ksu/bin/resetprop
 [ -x "$RESETPROP" ] || RESETPROP=/data/adb/ap/bin/resetprop
 [ -x "$RESETPROP" ] || RESETPROP=resetprop
-LOG="$MODDIR/spoof.log"
 
 # all switches default off; spoof.conf turns them on
 spoof_system=0; spoof_fingerprint=0; spoof_utc=0; spoof_date=0; spoof_os_patch=0; spoof_vendor_patch=0
@@ -116,7 +118,7 @@ patch_date() { # $1 = day-of-month suffix (01 for os, 05 for vendor)
 do_os_patch() { if_prop ro.build.version.security_patch "$(patch_date 01)"; }
 do_vendor_patch() { if_prop ro.vendor.build.security_patch "$(patch_date 05)"; }
 
-echo "$(date) spoof start" >> "$LOG"
+logi "spoof start (on:$(for k in spoof_system spoof_fingerprint spoof_utc spoof_date spoof_os_patch spoof_vendor_patch; do on "$k" && printf ' %s' "$k"; done))"
 on spoof_system && do_system
 on spoof_fingerprint && do_fingerprint
 on spoof_utc && do_utc
@@ -124,4 +126,4 @@ on spoof_date && do_date
 on spoof_os_patch && do_os_patch
 on spoof_vendor_patch && do_vendor_patch
 "$RESETPROP" -c --force 2>/dev/null || "$RESETPROP" -c 2>/dev/null || true
-echo "$(date) spoof done" >> "$LOG"
+logi "spoof done"

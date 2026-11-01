@@ -16,6 +16,9 @@
 # $1 = apply (default) | revert | beat. MIUI-only; a no-op elsewhere.
 
 MODDIR=${0%/*}
+logi() { :; }; logw() { :; }; loge() { :; }
+LOG_TAG=notify
+[ -f "$MODDIR/log.sh" ] && . "$MODDIR/log.sh"
 MARKER="$MODDIR/.notifyfix"
 HBD="$MODDIR/bin/hbd"
 INTERVAL=600                       # seconds between FCM reconnect nudges (wakes from sleep)
@@ -62,6 +65,7 @@ start_keeper() {
     pgrep -x hbd >/dev/null 2>&1 && return 0
     [ -x "$HBD" ] || chmod 0755 "$HBD" 2>/dev/null
     setsid "$HBD" "$INTERVAL" /system/bin/sh "$MODDIR/fixnotify.sh" beat >/dev/null 2>&1 </dev/null &
+    logi "heartbeat daemon launched (interval=${INTERVAL}s)"
 }
 
 stop_keeper() {
@@ -69,15 +73,17 @@ stop_keeper() {
 }
 
 apply() {
-    is_miui || return 0
+    is_miui || { logi "not a MIUI/HyperOS device; notification fix skipped"; return 0; }
     apply_once
     heartbeat
     start_keeper
+    logi "notification fix applied (GMS kept exempt, heartbeat running)"
 }
 
 # toggle off: stop the timer and drop only the FCM stack we added, keeping the user's own
 # entries (PowerKeeper re-derives the rest from its Battery "No restrictions" list anyway)
 revert() {
+    logi "reverting notification fix"
     stop_keeper
     cur=$(settings get system MILLET_NO_RESTRICT_APP 2>/dev/null)
     case "$cur" in ''|null|*[!A-Za-z0-9._,\ ]*) return 0 ;; esac
