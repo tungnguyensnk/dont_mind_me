@@ -3,7 +3,6 @@ set -eu
 
 config=/data/adb/tricky_store
 module=/data/adb/modules/dont_mind_me
-downloads=/storage/emulated/0/Download
 [ -f "$module/module.prop" ] || { echo 'not_installed' >&2; exit 1; }
 [ -d "$config" ] || { echo 'ts_no_config' >&2; exit 1; }
 
@@ -31,9 +30,6 @@ case "${1:-}" in
     open-keybox)
         am start -a android.intent.action.VIEW -d 'https://keybox.kowx712.cc' >/dev/null || { echo 'browser_fail' >&2; exit 1; }
         ;;
-    targets)
-        if [ -f "$config/target.txt" ]; then cat "$config/target.txt"; fi
-        ;;
     save)
         tmp=$(mktemp "$config/.target-XXXXXX") || exit 1
         trap 'rm -f "$tmp"' EXIT HUP INT TERM
@@ -51,29 +47,11 @@ case "${1:-}" in
         refresh_attestation
         echo 'ok'
         ;;
-    downloaded-keyboxes)
-        for file in "$downloads"/*; do
-            [ -f "$file" ] && [ ! -L "$file" ] || continue
-            case "${file##*/}" in
-                *.xml|*.XML) printf '%s' "${file##*/}" | base64 | tr -d '\n'; printf '\n';;
-            esac
-        done
-        ;;
-    set-keybox|set-downloaded-keybox)
+    set-keybox)
+        # the WebUI base64-encodes the chosen XML file's contents and passes them here
         tmp=$(mktemp "$config/.keybox-XXXXXX") || exit 1
         trap 'rm -f "$tmp"' EXIT HUP INT TERM
-        if [ "$1" = set-keybox ]; then
-            decode "${2:-}" > "$tmp" || exit 1
-        else
-            name=$(decode "${2:-}") || exit 1
-            case "$name" in
-                *.xml|*.XML) case "$name" in */*) echo 'kb_name_bad' >&2; exit 1;; esac;;
-                *) echo 'kb_not_xml' >&2; exit 1;;
-            esac
-            [ -f "$downloads/$name" ] && [ ! -L "$downloads/$name" ] || { echo 'kb_not_found' >&2; exit 1; }
-            [ "$(wc -c < "$downloads/$name")" -le 65536 ] || { echo 'kb_too_big' >&2; exit 1; }
-            cp "$downloads/$name" "$tmp" || exit 1
-        fi
+        decode "${2:-}" > "$tmp" || exit 1
         [ -s "$tmp" ] && [ "$(wc -c < "$tmp")" -le 65536 ] || { echo 'kb_bad_size' >&2; exit 1; }
         for tag in AndroidAttestation Keybox PrivateKey CertificateChain Certificate; do
             grep -q "<$tag[ >]" "$tmp" && grep -q "</$tag>" "$tmp" || { echo 'kb_missing_tags' >&2; exit 1; }

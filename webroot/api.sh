@@ -15,12 +15,10 @@ grep -q '"workMode":1' "$dir/status.json" || { echo 'hma_not_ready' >&2; exit 1;
 
 config=$dir/config.json
 case "${1:-}" in
-    list)
-        cmd package list packages -3 --user 0 | sed -n 's/^package://p' | sort -u
-        ;;
     bundle)
-        # single round-trip for the initial load: app list + all three configs,
-        # separated by markers the WebUI splits on (keeps ksu.exec calls to one)
+        # one round-trip for the WebUI's initial load: user-app list plus the three
+        # configs (targets, HMA scope, spoof flags) and the ADB/notify flags, joined
+        # by ===MARKER=== lines the WebUI splits on. keeps the call count to one.
         printf '%s\n' '===LIST==='
         cmd package list packages -3 --user 0 | sed -n 's/^package://p' | sort -u
         printf '%s\n' '===TARGETS==='
@@ -33,13 +31,6 @@ case "${1:-}" in
         v=$(settings get global adb_enabled 2>/dev/null); case "$v" in 1) echo 1;; *) echo 0;; esac
         printf '\n%s\n' '===NOTIFY==='
         [ -f "$module/.notifyfix" ] && echo 1 || echo 0
-        ;;
-    load)
-        if [ -f "$config" ]; then
-            cat "$config"
-        else
-            printf '%s\n' '{"configVersion":93,"scope":{}}'
-        fi
         ;;
     save)
         payload=${2:-}

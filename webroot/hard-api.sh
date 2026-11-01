@@ -4,11 +4,7 @@ module=/data/adb/modules/dont_mind_me
 conf=$module/spoof.conf
 keys='spoof_system spoof_fingerprint spoof_utc spoof_date spoof_os_patch spoof_vendor_patch'
 [ -f "$module/module.prop" ] || { echo 'not_installed' >&2; exit 1; }
-default() { for k in $keys; do echo "$k=1"; done; }
 case "${1:-}" in
-    load)
-        if [ -f "$conf" ]; then cat "$conf"; else default; fi
-        ;;
     save)
         payload=${2:-}
         case "$payload" in ''|*[!a-zA-Z0-9+/=]*) echo 'bad_input' >&2; exit 1;; esac
@@ -27,18 +23,12 @@ case "${1:-}" in
         trap - EXIT HUP INT TERM
         echo 'ok'
         ;;
-    adbget)
-        v=$(settings get global adb_enabled 2>/dev/null); case "$v" in 1) echo 1;; *) echo 0;; esac
-        ;;
     adbset)
         case "${2:-}" in
             1) settings put global adb_enabled 1 && echo 'ok';;
             0) settings put global adb_enabled 0 && echo 'ok';;
             *) echo 'bad_value' >&2; exit 1;;
         esac
-        ;;
-    notifyget)
-        [ -f "$module/.notifyfix" ] && echo 1 || echo 0
         ;;
     notifyset)
         case "${2:-}" in
