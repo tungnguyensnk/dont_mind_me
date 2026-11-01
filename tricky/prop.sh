@@ -1,7 +1,6 @@
 #!/bin/sh
 
-# reset boot/verified-boot state props so key attestation reports a locked device
-# ported from Tricky Addon (TA_utl) prop.sh to make the standalone WebUI build self-sufficient
+# reset boot / verified-boot state props so key attestation reports a locked device
 
 check_reset_prop() {
     local NAME=$1

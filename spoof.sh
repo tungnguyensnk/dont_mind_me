@@ -1,8 +1,7 @@
 #!/system/bin/sh
-# BRENE minimal: property spoofing only, ported faithfully from BRENE utils.sh.
-# every spoof is an independent switch in spoof.conf so each can be toggled to
-# find which ones an app actually needs. no path/mount hiding, no ksu-dir
-# hiding, no kernel features -> adb shell su stays intact.
+# property spoofing only. each spoof is an independent switch in spoof.conf, so you
+# can toggle them one at a time to find which ones an app actually needs. there is no
+# path/mount or ksu-dir hiding and no kernel feature use, so `adb shell su` stays intact.
 MODDIR=${0%/*}
 RESETPROP=/data/adb/ksu/bin/resetprop
 [ -x "$RESETPROP" ] || RESETPROP=/data/adb/ap/bin/resetprop
@@ -15,7 +14,7 @@ spoof_system=0; spoof_fingerprint=0; spoof_utc=0; spoof_date=0; spoof_os_patch=0
 
 on() { eval "[ \"\${$1:-0}\" = 1 ]"; }
 resetprop_n() { "$RESETPROP" -n "$1" "$2"; }
-# set only when the prop exists and differs (BRENE if_prop_exits_resetprop_n)
+# set only when the prop already exists and differs from the target value
 if_prop() {
     cur=$("$RESETPROP" "$1")
     [ -z "$cur" ] && return 0
@@ -103,7 +102,7 @@ do_date() {
     done
 }
 
-# os/vendor patch move to an always-recent date (same date math as BRENE)
+# move the OS / vendor security patch forward to an always-recent date
 patch_date() { # $1 = day-of-month suffix (01 for os, 05 for vendor)
     y=$(date +%Y); m=$(date +%m); d=$(date +%d)
     if [ "$d" -ge 5 ] 2>/dev/null; then

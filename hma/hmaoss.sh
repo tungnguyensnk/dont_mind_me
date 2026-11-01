@@ -1,6 +1,7 @@
 #!/system/bin/sh
 
-# ref: https://github.com/PerformanC/ReZygisk/blob/main/module/src/rezygisk.sh
+# boot-completed hook: restore the original module.prop after the HMA runtime
+# appends its status line to the live description.
 
 set -e
 

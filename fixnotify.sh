@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# MIUI/HyperOS notification delay fix (ref: PushGuard + Noti Keeper research).
+# MIUI/HyperOS notification delay fix.
 #
 # Two things kill push on HyperOS CN:
 #   1. the Greeze freezer can freeze Google Play Services, so its single FCM socket dies;

@@ -23,7 +23,7 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 1; done
 settings put global hide_error_dialogs 1 >/dev/null 2>&1
 rm -f "$MODDIR/.booting"
 
-# property spoofing (BRENE subset) runs once after boot
+# run the one-shot property spoof pass after boot
 [ -f "$MODDIR/spoof.conf" ] && sh "$MODDIR/spoof.sh"
 
 nm="$MODDIR/bin/nm"
@@ -42,7 +42,7 @@ if [ -x "$resetprop" ]; then
     done
 fi
 
-# ponytail: rules cover the main app UID; add package UIDs if its process model changes.
+# hide rules cover the main app UID; add more package UIDs if its process model changes.
 until cmd package list packages >/dev/null 2>&1; do sleep 1; done
 
 # MIUI notification fix (opt-in via WebUI): re-apply each boot since the settings reset
