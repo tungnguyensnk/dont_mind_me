@@ -134,6 +134,14 @@ chmod 644 "$MODPATH/gms/arm64-v8a/libgmsspoof.so"
 chcon u:object_r:system_lib_file:s0 "$MODPATH/gms/arm64-v8a/libgmsspoof.so" 2>/dev/null || true
 logi "spoof.conf, notification fix and GMS spoof library staged"
 
+# on install/upgrade, clear cached attestation keys + GMS/target app caches the same way
+# a WebUI save does, so the first boot fetches a fresh Play Integrity verdict
+if [ -f "$MODPATH/refresh-attestation.sh" ]; then
+    . "$MODPATH/refresh-attestation.sh"
+    refresh_attestation
+    step "cleared cached attestation keys and GMS/target app caches"
+fi
+
 # this module bundles nomount + HMA (incl OSS) + Tricky Store (incl OSS) + PIF + property
 # spoof + GMS patch, so auto-disable any separately installed copy to avoid slot/zygisk
 # clashes. match by id or name so every build/variant is caught; keep dont_mind_me and the

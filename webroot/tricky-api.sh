@@ -14,17 +14,9 @@ decode() {
     printf '%s' "$1" | base64 -d
 }
 
-# after a TrickyStore setting changes, drop the cached attestation keys and clear the
-# CACHE (never data) of GMS + every target app, then stop them so they fetch a fresh
-# Play Integrity verdict on next launch. clearing data would wipe logins, so we don't.
-refresh_attestation() {
-    rm -rf "$config/keys/"* 2>/dev/null
-    for pkg in com.google.android.gms $(grep -vE '^[[:space:]]*(#|$)' "$config/target.txt" 2>/dev/null | sed 's/[[:space:]]//g; s/[!?]*$//'); do
-        case "$pkg" in ''|*[!a-zA-Z0-9._]*) continue;; esac
-        rm -rf "/data/data/$pkg/cache/"* "/data/data/$pkg/code_cache/"* 2>/dev/null
-        am force-stop "$pkg" 2>/dev/null
-    done
-}
+# clears cached attestation keys + GMS/target caches after every save (shared with install)
+refresh_attestation() { :; }
+[ -f "$module/refresh-attestation.sh" ] && . "$module/refresh-attestation.sh"
 
 case "${1:-}" in
     open-keybox)
