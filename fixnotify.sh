@@ -8,20 +8,28 @@
 # GMS is the shared FCM deliverer, so fixing it fixes push for every app at once.
 #
 # Fix: keep GMS on the Settings.System key MILLET_NO_RESTRICT_APP (Greeze's exemption list,
-# which PowerKeeper strips on battery/config/boot changes) and nudge GMS to reconnect on a
-# schedule. The schedule runs from `hbd`, a CLOCK_BOOTTIME_ALARM timer that fires THROUGH
-# deep sleep and wakes the device — a plain shell `sleep` loop is paused while suspended, so
-# it never heartbeats overnight (that was the bug: woke to zero notifications).
+# which PowerKeeper strips on battery/config/boot changes). two mechanisms maintain it:
+#   - `hbd`, a CLOCK_BOOTTIME_ALARM timer that fires THROUGH deep sleep (a plain shell `sleep`
+#     loop is paused while suspended, so it never heartbeats overnight) to re-add GMS if
+#     needed and nudge the push socket to reconnect;
+#   - `inotifyd`, a watcher on the settings file that re-adds GMS within ~1s of PowerKeeper
+#     dropping it, so push does not wait up to a full timer interval to recover.
 #
-# $1 = apply (default) | revert | beat. MIUI-only; a no-op elsewhere.
+# $1 = apply (default) | revert | beat | repair. MIUI-only; a no-op elsewhere.
 
 MODDIR=${0%/*}
+# inotifyd runs its agent with a minimal environment, so give every caller a sane PATH;
+# harmless for the boot/WebUI callers that already have one
+export PATH=/system/bin:/system/xbin:/vendor/bin${PATH:+:$PATH}
 logi() { :; }; logw() { :; }; loge() { :; }
 LOG_TAG=notify
 [ -f "$MODDIR/log.sh" ] && . "$MODDIR/log.sh"
 MARKER="$MODDIR/.notifyfix"
 HBD="$MODDIR/bin/hbd"
 INTERVAL=1200                      # seconds between FCM reconnect nudges (wakes from sleep)
+WATCHAGENT="$MODDIR/notify/watch-agent.sh"   # inotifyd agent (see start_watcher)
+WATCHDIR=/data/system/users/0                # SettingsProvider persists system settings here
+WATCHPID="$MODDIR/.watch.pid"                # pid of the inotifyd watcher
 GMS=com.google.android.gms
 FCM="$GMS com.google.android.gsf com.android.vending"
 
@@ -73,6 +81,15 @@ beat() {
         apply_once
         heartbeat
     fi
+    start_watcher   # relaunch the event-driven watcher if it has died since the last tick
+}
+
+# event-driven repair, fired by the inotifyd watcher when the settings file is rewritten.
+# unlike beat it never sends a reconnect on its own (it runs on every settings change, not on
+# a schedule), so it only acts when GMS was actually dropped — then it re-adds and reconnects.
+repair() {
+    [ -f "$MARKER" ] || return 0
+    has_gms || { apply_once; heartbeat; }
 }
 
 start_keeper() {
@@ -86,12 +103,36 @@ stop_keeper() {
     for p in $(pgrep -x hbd 2>/dev/null); do kill "$p" 2>/dev/null || kill -9 "$p" 2>/dev/null; done
 }
 
+# event-driven half: an inotifyd watcher on the settings directory that runs `repair` the
+# instant PowerKeeper strips GMS, so push recovers in ~1s instead of waiting for the next hbd
+# tick. no installed app is involved. the hbd timer is the fallback, so a missing inotifyd or
+# a failed launch only loses the fast reaction, never the fix itself.
+start_watcher() {
+    command -v inotifyd >/dev/null 2>&1 || return 0
+    [ -x "$WATCHAGENT" ] || chmod 0755 "$WATCHAGENT" 2>/dev/null
+    [ -f "$WATCHAGENT" ] && [ -d "$WATCHDIR" ] || return 0
+    if [ -f "$WATCHPID" ] && kill -0 "$(cat "$WATCHPID" 2>/dev/null)" 2>/dev/null; then
+        return 0
+    fi
+    setsid inotifyd "$WATCHAGENT" "$WATCHDIR" >/dev/null 2>&1 </dev/null &
+    echo $! > "$WATCHPID"
+    logi "settings watcher launched (pid $(cat "$WATCHPID" 2>/dev/null))"
+}
+
+stop_watcher() {
+    [ -f "$WATCHPID" ] || return 0
+    _p=$(cat "$WATCHPID" 2>/dev/null)
+    [ -n "$_p" ] && { kill "$_p" 2>/dev/null || kill -9 "$_p" 2>/dev/null; }
+    rm -f "$WATCHPID"
+}
+
 apply() {
     is_miui || { logi "not a MIUI/HyperOS device; notification fix skipped"; return 0; }
     apply_once
     heartbeat
     start_keeper
-    logi "notification fix applied (GMS kept exempt, heartbeat running)"
+    start_watcher
+    logi "notification fix applied (GMS kept exempt, timer + settings watcher running)"
 }
 
 # toggle off: stop the timer and drop only the FCM stack we added, keeping the user's own
@@ -99,6 +140,7 @@ apply() {
 revert() {
     logi "reverting notification fix"
     stop_keeper
+    stop_watcher
     cur=$(settings get system MILLET_NO_RESTRICT_APP 2>/dev/null)
     case "$cur" in ''|null|*[!A-Za-z0-9._,\ ]*) return 0 ;; esac
     new=$(printf '%s\n' "$cur" | tr ',' '\n' | sed 's/[[:space:]]//g' \
@@ -110,6 +152,7 @@ revert() {
 case "${1:-apply}" in
     revert) revert ;;
     beat) beat ;;
+    repair) repair ;;
     *) apply ;;
 esac
 exit 0

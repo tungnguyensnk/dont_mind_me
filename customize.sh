@@ -126,6 +126,7 @@ esac
 chmod 644 "$MODPATH/spoof.conf"
 chmod 755 "$MODPATH/spoof.sh"
 chmod 755 "$MODPATH/fixnotify.sh"
+chmod 755 "$MODPATH/notify/watch-agent.sh"
 # keep the notification-fix toggle across module updates
 [ -f /data/adb/modules/dont_mind_me/.notifyfix ] && : > "$MODPATH/.notifyfix"
 # on a first install (no live module dir yet) start from a quiet default: the notification
