@@ -2,8 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const html = fs.readFileSync(__dirname + '/webroot/index.html', 'utf8');
-const code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const code = fs.readFileSync(__dirname + '/webroot/app.js', 'utf8');
 const elements = new Map();
 function element() {
   return {
