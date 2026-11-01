@@ -128,6 +128,14 @@ chmod 755 "$MODPATH/spoof.sh"
 chmod 755 "$MODPATH/fixnotify.sh"
 # keep the notification-fix toggle across module updates
 [ -f /data/adb/modules/dont_mind_me/.notifyfix ] && : > "$MODPATH/.notifyfix"
+# on a first install (no live module dir yet) start from a quiet default: the notification
+# fix stays off (no marker is copied above) and ADB debugging is turned off; the user opts
+# into each from the WebUI. an update keeps whatever the user already chose.
+if [ ! -d /data/adb/modules/dont_mind_me ]; then
+    settings put global adb_enabled 0 2>/dev/null \
+        && step "first install: ADB debugging turned off" \
+        || logw "first install: could not turn off ADB debugging"
+fi
 # the GMS process System.load()s this lib via the Bridge (packages/com.google.android.gms
 # gates it in); system_lib_file lets the app domain dlopen/mmap-execute it through /proc/self/fd
 chmod 644 "$MODPATH/gms/arm64-v8a/libgmsspoof.so"
