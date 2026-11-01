@@ -47,7 +47,10 @@ automatically when the system language is Vietnamese.
   spoofing and the Play Services patch all work from a single install — no stacking
   separate modules, and any conflicting one already present is disabled automatically.
 - **Target apps.** One list drives both the visibility engine and the attestation
-  targets — tick the apps that should see a clean device.
+  targets — tick the apps that should see a clean device. By default each selected app
+  is only blind to known root / manager apps (Magisk, KernelSU, APatch, LSPosed, Lucky
+  Patcher…), while ordinary apps stay visible; a **Stronger hiding** switch instead makes
+  it blind to every user app, at the cost of cross‑app features like sharing.
 - **Property spoofing.** Six independent switches (system, fingerprint, UTC, date,
   OS patch level, vendor patch level) so each can be toggled to find exactly what an
   app needs.
@@ -78,7 +81,7 @@ The WebUI has four tabs:
 
 | Tab | What it does |
 | --- | --- |
-| **Apps** | Pick the target apps that should see a clean device. |
+| **Apps** | Pick the target apps that should see a clean device; toggle **Stronger hiding** to hide every user app instead of only root / manager apps. |
 | **Properties** | Toggle the six property‑spoof switches. |
 | **Attestation** | Set the Keystore keybox and the security‑patch date. |
 | **System** | Toggle ADB debugging and the Xiaomi notification fix. |

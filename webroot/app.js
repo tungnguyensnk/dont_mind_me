@@ -2,6 +2,19 @@ const base = '/data/adb/modules/dont_mind_me/webroot/';
 const $ = id => document.getElementById(id);
 const HARD_KEYS = ['spoof_system', 'spoof_fingerprint', 'spoof_utc', 'spoof_date', 'spoof_os_patch', 'spoof_vendor_patch'];
 const FLAGS = ['spoof_system', 'spoof_utc', 'spoof_date', 'spoof_fingerprint', 'spoof_os_patch', 'spoof_vendor_patch'];
+// packages hidden (blacklist) from every selected target app so an app that scans for
+// root/xposed managers and known root-only tools sees a clean device. a listed package
+// that is not installed is simply ignored by the HMA runtime, so the list can be static.
+const HIDE_PKGS = [
+  // root / kernel managers
+  'com.topjohnwu.magisk', 'io.github.huskydg.magisk', 'me.weishu.kernelsu',
+  'com.rifsxd.ksunext', 'me.bmax.apatch',
+  // xposed frameworks
+  'org.lsposed.manager', 'de.robv.android.xposed.installer', 'org.meowcat.edxposed.manager',
+  // root-only / patching tools and privileged access
+  'com.keramidas.TitaniumBackup', 'org.adaway', 'com.chelpus.lackypatch',
+  'com.dimonvideo.luckypatcher', 'ru.aaaaaaac.ljkjlk', 'moe.shizuku.privileged.api',
+];
 const TABS = ['apps', 'spoof', 'keybox', 'system'];
 const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 const CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>';
@@ -20,6 +33,7 @@ const I18N = {
     sbSavedDetail: 'Tap Reboot to apply.', sbSyncHint: 'Lists differ — tap Save to sync.', saveApps: 'Save apps', rebootBtn: 'Reboot',
     dapp: n => `+${n} app${n > 1 ? 's' : ''}`, drem: n => `−${n} app${n > 1 ? 's' : ''}`, dfl: n => `${n} propert${n > 1 ? 'ies' : 'y'}`,
     emptyNoMatch: 'No app found.', emptyNone: 'No user apps.', chipUnsaved: 'Unsaved',
+    strongLabel: 'Stronger hiding', strongHint: 'Selected apps see no other user apps at all — stronger, but cross-app features (sharing, opening links between apps) may break.',
     kbSection: 'Keybox', kbFileLabel: 'Keybox file (XML)', kbSetBtn: 'Set keybox', kbPickPh: 'Choose XML file',
     kbOpenTitle: 'Open keybox page', kbPickFirst: 'Choose an XML file first.', kbUsing: n => `Using ${n}`, kbSetOk: 'Keybox set',
     kbOpenOk: 'Opened keybox page', kbOpenDetail: 'Download the XML then come back here.',
@@ -49,6 +63,7 @@ const I18N = {
     sbSavedDetail: 'Nhấn Khởi động lại để áp dụng.', sbSyncHint: 'Các danh sách đang khác nhau — nhấn Lưu để đồng bộ.', saveApps: 'Lưu ứng dụng', rebootBtn: 'Khởi động lại',
     dapp: n => `+${n} ứng dụng`, drem: n => `−${n} ứng dụng`, dfl: n => `${n} thông số`,
     emptyNoMatch: 'Không tìm thấy ứng dụng.', emptyNone: 'Không có ứng dụng người dùng nào.', chipUnsaved: 'Chưa lưu',
+    strongLabel: 'Ẩn mạnh mẽ hơn', strongHint: 'App đã chọn sẽ không thấy bất kỳ app người dùng nào khác — kín hơn, nhưng các tính năng liên app (chia sẻ, mở liên kết giữa các app) có thể bị ảnh hưởng.',
     kbSection: 'Keybox', kbFileLabel: 'Tệp keybox (XML)', kbSetBtn: 'Đặt keybox', kbPickPh: 'Chọn tệp XML',
     kbOpenTitle: 'Mở trang keybox', kbPickFirst: 'Chọn tệp XML trước.', kbUsing: n => `Đang dùng ${n}`, kbSetOk: 'Đã đặt keybox',
     kbOpenOk: 'Đã mở trang keybox', kbOpenDetail: 'Tải tệp XML rồi quay lại đây',
@@ -105,6 +120,9 @@ const errText = raw => (ERR[raw] && ERR[raw][LANG]) || raw;
 
 let packages = [], selected = new Set(), original = new Set(), lines = [], hma, hardFlags = {}, savedFlags = {};
 let dirty = false, busy = false, retry = false, savedScope, needsReboot = false, loading = true, saveError = '', callbackId = 0;
+// stronger hiding: when on, selected apps use whitelist mode (blind to every user app);
+// when off (default), they use blacklist mode and only HIDE_PKGS is hidden from them
+let strongHide = false;
 let tab = 0, kbPick = '', kbFile = null, kbSet = '', dialogKind = null, toastTimer, curPull = 0, rebootGuard;
 
 function section(text, name) {
@@ -268,12 +286,16 @@ async function load() {
     const names = list.split('\n').map(v => v.trim()).filter(v => /^[a-zA-Z0-9_.]+$/.test(v)).sort();
     const targetLines = text.split('\n');
     const targets = new Set(targetLines.map(line => line.trim().replace(/[!?]$/, '')).filter(name => names.includes(name)));
-    const whitelisted = new Set(names.filter(name => next.scope[name]?.useWhitelist === true));
+    // an app we manage carries a scope entry; presence means "root is hidden from it"
+    const hidden = new Set(names.filter(name => !!next.scope[name]));
+    // reflect the saved mode: a whitelist-mode entry means stronger hiding is on
+    strongHide = names.some(name => next.scope[name]?.useWhitelist === true);
+    $('strong-toggle').checked = strongHide;
     hma = next; packages = names; lines = targetLines;
-    original = new Set([...targets, ...whitelisted]);
+    original = new Set([...targets, ...hidden]);
     selected = new Set(original);
     retry = false; savedScope = undefined; needsReboot = false;
-    dirty = names.some(name => targets.has(name) !== whitelisted.has(name));
+    dirty = names.some(name => targets.has(name) !== hidden.has(name));
   } catch (error) {
     packages = []; selected = new Set(); original = new Set();
     toast(error.message, false);
@@ -293,8 +315,15 @@ async function persist() {
     const next = [...kept, ...added].join('\n').replace(/\n*$/, '\n');
     const scope = { ...hma.scope };
     for (const name of packages) {
-      if (selected.has(name)) scope[name] = { ...scope[name], useWhitelist: true, excludeSystemApps: true };
-      else if (scope[name]?.useWhitelist === true) delete scope[name];
+      // strong: whitelist with an empty allow list + excludeSystemApps, so the app sees
+      //   only system apps (every user app is hidden).
+      // default: blacklist, so the app is only blind to HIDE_PKGS and still sees ordinary
+      //   apps like a clean device; excludeSystemApps is off so a listed package is hidden
+      //   even if it happens to be a system app.
+      if (selected.has(name)) scope[name] = strongHide
+        ? { ...scope[name], useWhitelist: true, excludeSystemApps: true, applyTemplates: [], extraAppList: [] }
+        : { ...scope[name], useWhitelist: false, excludeSystemApps: false, applyTemplates: [], extraAppList: HIDE_PKGS };
+      else if (scope[name]) delete scope[name];
     }
     const encoded = value => btoa(unescape(encodeURIComponent(value)));
     await run(`save ${encoded(HARD_KEYS.map(k => `${k}=${hardFlags[k] ? 1 : 0}`).join('\n') + '\n')}`, 'hard');
@@ -458,6 +487,7 @@ $('search-clear').addEventListener('click', () => { $('search').value = ''; rend
 $('save-btn').addEventListener('click', () => { if (!dirty && needsReboot && !busy) openDialog('reboot'); else persist(); });
 $('adb-toggle').addEventListener('change', () => toggleSys('adb-toggle', 'adbset', L.adbName));
 $('notify-toggle').addEventListener('change', () => toggleSys('notify-toggle', 'notifyset', L.notifName));
+$('strong-toggle').addEventListener('change', () => { strongHide = $('strong-toggle').checked; markDirty(); });
 $('kb-box').addEventListener('click', () => $('kb-file').click());
 $('kb-file').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) { kbFile = f; kbPick = f.name; setKbText(); } });
 $('kb-open').addEventListener('click', async () => { try { await run('open-keybox'); toast(L.kbOpenOk, true, L.kbOpenDetail); } catch (error) { toast(error.message, false); } });

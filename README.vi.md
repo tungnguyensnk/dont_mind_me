@@ -45,7 +45,10 @@ mặc định **tiếng Anh**, tự chuyển sang **tiếng Việt** khi ngôn n
   thuộc tính và vá Play Services đều chạy từ một lần cài — không phải chồng nhiều module,
   và mọi module xung đột sẵn có sẽ bị tự tắt.
 - **Ứng dụng mục tiêu.** Một danh sách duy nhất điều khiển cả engine ẩn ứng dụng lẫn
-  danh sách mục tiêu attestation — tick những app cần thấy một thiết bị "sạch".
+  danh sách mục tiêu attestation — tick những app cần thấy một thiết bị "sạch". Mặc định
+  mỗi app đã chọn chỉ bị ẩn nhóm app root / manager (Magisk, KernelSU, APatch, LSPosed,
+  Lucky Patcher…), các app bình thường vẫn hiện; công tắc **Ẩn mạnh mẽ hơn** sẽ ẩn mọi
+  app người dùng khỏi app đó, đổi lại các tính năng liên app như chia sẻ có thể bị ảnh hưởng.
 - **Spoof thuộc tính.** Sáu công tắc độc lập (system, fingerprint, UTC, date, OS patch
   level, vendor patch level) để bật/tắt từng cái và tìm đúng thứ một app cần.
 - **Keybox Keystore.** Chọn file keybox `.xml` qua trình chọn file hệ thống rồi áp dụng.
@@ -76,7 +79,7 @@ WebUI có bốn tab:
 
 | Tab | Chức năng |
 | --- | --- |
-| **Ứng dụng** | Chọn các app mục tiêu cần thấy một thiết bị "sạch". |
+| **Ứng dụng** | Chọn các app mục tiêu cần thấy một thiết bị "sạch"; bật **Ẩn mạnh mẽ hơn** để ẩn mọi app người dùng thay vì chỉ ẩn nhóm app root / manager. |
 | **Thông số** | Bật/tắt sáu công tắc spoof thuộc tính. |
 | **Chứng thực** | Đặt keybox Keystore và ngày bản vá bảo mật. |
 | **Hệ thống** | Bật/tắt ADB debugging và fix thông báo Xiaomi. |

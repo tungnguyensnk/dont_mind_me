@@ -63,16 +63,24 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(elements.get('count').textContent, '2 đã chọn', 'app.one + app.two selected');
   for (const k of ['spoof_system','spoof_os_patch','spoof_vendor_patch']) assert.equal(elements.get('sw-' + k).checked, true, k + ' on');
   assert.equal(elements.get('adb-toggle').checked, false, 'adb off');
+  // stronger-hiding toggle reflects the saved whitelist-mode entry (app.one)
+  assert.equal(elements.get('strong-toggle').checked, true, 'strong hide on when a scope entry is whitelist mode');
   // adb toggle immediate
   elements.get('adb-toggle').checked = true; elements.get('adb-toggle').change();
   await tick();
   assert.equal(adbState, 1, 'adb enabled immediately');
+  // turn stronger hiding off: selected apps switch to blacklist mode on the next save
+  const strong = elements.get('strong-toggle'); strong.checked = false; strong.change();
   // sync + save (lists differ: app.one whitelisted but not target)
   assert.equal(elements.get('save-btn').disabled, false, 'differing lists need save');
   elements.get('save-btn').click();
   await tick();
   assert.deepEqual(calls, ['hard', 'hma', 'tricky'], 'saves hard, hma, tricky');
   assert.equal(elements.get('save-btn').textContent, 'Khởi động lại', 'save becomes restart');
+  // blacklist mode written for every selected app, hiding the known root packages
+  assert.equal(hma.scope['app.one'].useWhitelist, false, 'app.one now blacklist mode');
+  assert.equal(hma.scope['app.one'].extraAppList.includes('com.topjohnwu.magisk'), true, 'root manager is hidden');
+  assert.equal(hma.scope['app.two'].useWhitelist, false, 'app.two blacklisted too');
   // toggle a spoof off, save again
   const sb = elements.get('sw-spoof_os_patch'); sb.checked = false; sb.change();
   assert.equal(elements.get('save-btn').disabled, false, 'toggle marks dirty');
@@ -88,5 +96,5 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 10));
   elements.get('dlg-confirm').click();
   await tick();
   assert.equal(rebooted, true, 'confirming restart reboots');
-  console.log('dont_mind_me WebUI: app picker (HMA+Tricky), 6 spoof switches, adb toggle, save->confirm->restart OK');
+  console.log('dont_mind_me WebUI: app picker (HMA blacklist/strong toggle+Tricky), 6 spoof switches, adb toggle, save->confirm->restart OK');
 })().catch(error => { console.error(error); process.exitCode = 1; });
