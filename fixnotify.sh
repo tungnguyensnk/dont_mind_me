@@ -21,7 +21,7 @@ LOG_TAG=notify
 [ -f "$MODDIR/log.sh" ] && . "$MODDIR/log.sh"
 MARKER="$MODDIR/.notifyfix"
 HBD="$MODDIR/bin/hbd"
-INTERVAL=600                       # seconds between FCM reconnect nudges (wakes from sleep)
+INTERVAL=1200                      # seconds between FCM reconnect nudges (wakes from sleep)
 GMS=com.google.android.gms
 FCM="$GMS com.google.android.gsf com.android.vending"
 
@@ -48,17 +48,31 @@ apply_once() {
     [ -n "$l" ] && settings put system MILLET_NO_RESTRICT_APP "$l" 2>/dev/null
 }
 
-# nudge GMS to reconnect / heartbeat its push socket; GMS takes these without a permission
-heartbeat() {
+# a cheap nudge: GCM_RECONNECT re-establishes the push socket only if it is actually down,
+# and is a no-op while the socket is alive, so it is safe to send every tick without waking
+# the radio when nothing is wrong. GMS takes it without a permission.
+reconnect() {
     am broadcast -a com.google.android.intent.action.GCM_RECONNECT -p "$GMS" >/dev/null 2>&1
+}
+
+# a full heartbeat also forces GMS to send a keepalive packet right now, which wakes the
+# radio; only worth it just after GMS was unfrozen, when its push socket was torn down
+heartbeat() {
+    reconnect
     am broadcast -a com.google.android.intent.action.MCS_HEARTBEAT -p "$GMS" >/dev/null 2>&1
 }
 
-# one tick, invoked by hbd on each wake: keep GMS exempt, then reconnect
+# one tick, invoked by hbd on each wake. if GMS is still exempt its socket should be alive,
+# so send only the cheap reconnect; reserve the full heartbeat for when PowerKeeper has just
+# stripped GMS and we re-add it, to avoid waking the radio on every tick for nothing
 beat() {
     [ -f "$MARKER" ] || return 0
-    has_gms || apply_once
-    heartbeat
+    if has_gms; then
+        reconnect
+    else
+        apply_once
+        heartbeat
+    fi
 }
 
 start_keeper() {
