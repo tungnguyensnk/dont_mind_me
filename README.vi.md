@@ -101,8 +101,8 @@ Trên Windows (PowerShell):
 .\build.ps1
 ```
 
-Lệnh này tạo `out/dont_mind_me.zip`. Bản vá Google Play Services (native) nằm trong
-[`gms/src`](gms/src) và được build riêng; sản phẩm đã biên dịch được commit sẵn.
+Lệnh này tạo `out/dont_mind_me.zip`. Trình `hbd` (hẹn giờ cho fix thông báo) được build
+riêng từ [`notify/hbd.c`](notify/hbd.c); bản đã biên dịch `bin/hbd` được commit sẵn.
 
 ## Ghi nhận
 

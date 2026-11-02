@@ -121,8 +121,10 @@ case "$realpatch" in
         ;;
 esac
 
-# property spoof switches ship with the module (all default ON); keep user's on upgrade
-[ -f "$MODPATH/spoof.conf" ] || printf 'spoof_system=1\nspoof_fingerprint=1\nspoof_utc=1\nspoof_date=1\nspoof_os_patch=1\nspoof_vendor_patch=1\n' > "$MODPATH/spoof.conf"
+# property spoof switches ship with the module; the OS/vendor patch forward-spoof defaults
+# OFF so GMS/DroidGuard reads the REAL patch (Play Integrity STRONG holds with no GMS hook);
+# apps that need a recent patch get it per-app via the Techcombank fix. keep user's on upgrade
+[ -f "$MODPATH/spoof.conf" ] || printf 'spoof_system=1\nspoof_fingerprint=1\nspoof_utc=1\nspoof_date=1\nspoof_os_patch=0\nspoof_vendor_patch=0\n' > "$MODPATH/spoof.conf"
 chmod 644 "$MODPATH/spoof.conf"
 chmod 755 "$MODPATH/spoof.sh"
 chmod 755 "$MODPATH/fixnotify.sh"
@@ -137,11 +139,7 @@ if [ ! -d /data/adb/modules/dont_mind_me ]; then
         && step "first install: ADB debugging turned off" \
         || logw "first install: could not turn off ADB debugging"
 fi
-# the GMS process System.load()s this lib via the Bridge (packages/com.google.android.gms
-# gates it in); system_lib_file lets the app domain dlopen/mmap-execute it through /proc/self/fd
-chmod 644 "$MODPATH/gms/arm64-v8a/libgmsspoof.so"
-chcon u:object_r:system_lib_file:s0 "$MODPATH/gms/arm64-v8a/libgmsspoof.so" 2>/dev/null || true
-logi "spoof.conf, notification fix and GMS spoof library staged"
+logi "spoof.conf and notification fix staged"
 
 # on install/upgrade, clear cached attestation keys + GMS/target app caches the same way
 # a WebUI save does, so the first boot fetches a fresh Play Integrity verdict
@@ -165,5 +163,5 @@ for d in /data/adb/modules/*/; do
         touch "$d/disable" && step "disabled conflicting module: $mid"
     fi
 done
-step "Don't mind me v$current staged (HMA, Tricky Store, nomount, spoof, GMS patch)"
+step "Don't mind me v$current staged (HMA, Tricky Store, nomount, property spoof)"
 logi "install finished"

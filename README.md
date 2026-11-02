@@ -103,8 +103,8 @@ On Windows (PowerShell):
 .\build.ps1
 ```
 
-This produces `out/dont_mind_me.zip`. The native Google Play Services patch lives in
-[`gms/src`](gms/src) and is built separately; the compiled artifacts are checked in.
+This produces `out/dont_mind_me.zip`. The `hbd` wake-alarm helper (notification fix)
+is built separately from [`notify/hbd.c`](notify/hbd.c); the compiled `bin/hbd` is checked in.
 
 ## Acknowledgements
 
