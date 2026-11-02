@@ -26,7 +26,7 @@ LOG_TAG=notify
 [ -f "$MODDIR/log.sh" ] && . "$MODDIR/log.sh"
 MARKER="$MODDIR/.notifyfix"
 HBD="$MODDIR/bin/hbd"
-INTERVAL=1200                      # seconds between FCM reconnect nudges (wakes from sleep)
+INTERVAL=300                       # seconds between forced FCM heartbeats (fires through doze)
 WATCHAGENT="$MODDIR/notify/watch-agent.sh"   # inotifyd agent (see start_watcher)
 WATCHDIR=/data/system/users/0                # SettingsProvider persists system settings here
 WATCHPID="$MODDIR/.watch.pid"                # pid of the inotifyd watcher
@@ -56,40 +56,37 @@ apply_once() {
     [ -n "$l" ] && settings put system MILLET_NO_RESTRICT_APP "$l" 2>/dev/null
 }
 
-# a cheap nudge: GCM_RECONNECT re-establishes the push socket only if it is actually down,
-# and is a no-op while the socket is alive, so it is safe to send every tick without waking
-# the radio when nothing is wrong. GMS takes it without a permission.
-reconnect() {
+# prod GMS to prove its push socket is alive and reconnect if it is not. the FCM diagnostic
+# (*#*#426#*#*) shows the real failure on HyperOS: the mtalk.google.com:5228 socket dies
+# silently in deep sleep (NAT/carrier drops it with no FIN) and GMS does not notice for up to
+# an hour, because its ~6 min heartbeat alarm is deferred while the device is idle — so pushes
+# pile up until it finally heartbeats, finds the socket dead, and reconnects.
+#
+# a half-open socket still shows ESTABLISHED in /proc/net/tcp, so checking the socket there
+# cannot detect this; only an actual heartbeat does. so force one every tick: MCS_HEARTBEAT /
+# ACTION_HEARTBEAT_NOW make GMS send a keepalive now (which exposes a dead socket and makes it
+# reconnect), and GCM_RECONNECT rebuilds the socket if it was already torn down. GMS takes all
+# three without a permission. hbd fires through doze (CLOCK_BOOTTIME_ALARM), which is the whole
+# point: it lands the heartbeat GMS's own deferred alarm would have skipped.
+nudge() {
+    am broadcast -a com.google.android.intent.action.MCS_HEARTBEAT -p "$GMS" >/dev/null 2>&1
+    am broadcast -a com.google.android.gms.gcm.ACTION_HEARTBEAT_NOW -p "$GMS" >/dev/null 2>&1
     am broadcast -a com.google.android.intent.action.GCM_RECONNECT -p "$GMS" >/dev/null 2>&1
 }
 
-# a full heartbeat also forces GMS to send a keepalive packet right now, which wakes the
-# radio; only worth it just after GMS was unfrozen, when its push socket was torn down
-heartbeat() {
-    reconnect
-    am broadcast -a com.google.android.intent.action.MCS_HEARTBEAT -p "$GMS" >/dev/null 2>&1
-}
-
-# one tick, invoked by hbd on each wake. if GMS is still exempt its socket should be alive,
-# so send only the cheap reconnect; reserve the full heartbeat for when PowerKeeper has just
-# stripped GMS and we re-add it, to avoid waking the radio on every tick for nothing
+# one tick, invoked by hbd on each wake: keep GMS exempt, then force a heartbeat probe.
 beat() {
     [ -f "$MARKER" ] || return 0
-    if has_gms; then
-        reconnect
-    else
-        apply_once
-        heartbeat
-    fi
+    has_gms || apply_once
+    nudge
     start_watcher   # relaunch the event-driven watcher if it has died since the last tick
 }
 
 # event-driven repair, fired by the inotifyd watcher when the settings file is rewritten.
-# unlike beat it never sends a reconnect on its own (it runs on every settings change, not on
-# a schedule), so it only acts when GMS was actually dropped — then it re-adds and reconnects.
+# it only acts when PowerKeeper has just dropped GMS from the list — re-add it and reconnect.
 repair() {
     [ -f "$MARKER" ] || return 0
-    has_gms || { apply_once; heartbeat; }
+    has_gms || { apply_once; nudge; }
 }
 
 start_keeper() {
@@ -129,10 +126,10 @@ stop_watcher() {
 apply() {
     is_miui || { logi "not a MIUI/HyperOS device; notification fix skipped"; return 0; }
     apply_once
-    heartbeat
+    nudge
     start_keeper
     start_watcher
-    logi "notification fix applied (GMS kept exempt, timer + settings watcher running)"
+    logi "notification fix applied (GMS kept exempt, heartbeat timer + watcher running)"
 }
 
 # toggle off: stop the timer and drop only the FCM stack we added, keeping the user's own
