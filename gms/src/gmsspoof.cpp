@@ -16,7 +16,6 @@
 #include <jni.h>
 #include <dlfcn.h>
 #include <string>
-#include <map>
 #include <fstream>
 
 #include "shadowhook.h"
@@ -26,12 +25,21 @@
 static std::string realPatch;
 
 typedef void (*T_Callback)(void *, const char *, const char *, uint32_t);
-static std::map<void *, T_Callback> callbacks;
+
+// the real callback for the read in flight. the chain
+//   __system_property_read_callback(pi, cb, cookie)
+//     -> o_...(pi, modify_callback, cookie) -> modify_callback(...) -> cb(...)
+// runs synchronously on ONE thread, so a thread_local hands the real callback to
+// modify_callback without any cross-thread sharing. the previous global std::map was read
+// and written from many threads with no lock, which corrupted the tree and made it jump to
+// a garbage function pointer -> SIGSEGV in GMS (the crash-loop cause).
+static thread_local T_Callback tls_callback = nullptr;
 
 // swap any "*.security_patch" property (ro.build.version.security_patch,
 // ro.vendor.build.security_patch, ...) back to the real firmware value
 static void modify_callback(void *cookie, const char *name, const char *value, uint32_t serial) {
-    if (cookie == nullptr || name == nullptr || value == nullptr || !callbacks.contains(cookie)) return;
+    T_Callback cb = tls_callback;   // capture locally so a reentrant read can't clobber it
+    if (cb == nullptr || name == nullptr || value == nullptr) return;
 
     const char *oldValue = value;
     std::string prop(name);
@@ -41,7 +49,7 @@ static void modify_callback(void *cookie, const char *name, const char *value, u
 
     if (oldValue != value) LOGD("[%s]: %s -> %s", name, oldValue, value);
 
-    return callbacks[cookie](cookie, name, value, serial);
+    cb(cookie, name, value, serial);
 }
 
 static void (*o_system_property_read_callback)(const prop_info *, T_Callback, void *);
@@ -50,8 +58,8 @@ static void my_system_property_read_callback(const prop_info *pi, T_Callback cal
     if (pi == nullptr || callback == nullptr || cookie == nullptr) {
         return o_system_property_read_callback(pi, callback, cookie);
     }
-    callbacks[cookie] = callback;
-    return o_system_property_read_callback(pi, modify_callback, cookie);
+    tls_callback = callback;
+    o_system_property_read_callback(pi, modify_callback, cookie);
 }
 
 // ShadowHook calls sh_linker_init for deferred by-name hooks; we hook an already-loaded
@@ -116,7 +124,12 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     return JNI_VERSION_1_6;
 }
 
-// called by Bridge.main() after app specialization (correct time to install the hook)
+// called by Bridge.main() after app specialization (correct time to install the hook).
+// the hook is installed in EVERY GMS process the Bridge loads us into (not just DroidGuard):
+// the patch read that decides Play Integrity on this TrickyStore + libgmsspoof setup can
+// happen in the main GMS process too, so narrowing to com.google.android.gms.unstable dropped
+// STRONG. the crash this once caused was the unsynchronized callback map, now fixed with the
+// thread_local above, so the wide scope is safe.
 extern "C" JNIEXPORT void JNICALL Java_Bridge_activateGms(JNIEnv *env, jclass) {
     if (realPatch.empty()) realPatch = readRealPatch();
     if (realPatch.empty()) {
