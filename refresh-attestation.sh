@@ -21,11 +21,15 @@ refresh_attestation() {
     _dg=$(pidof com.google.android.gms.unstable 2>/dev/null)
     [ -n "$_dg" ] && kill $_dg 2>/dev/null
 
-    # target (banking) apps: clear cache + stop so they re-check integrity next launch
+    # target (banking) apps: clear cache + kill so they re-check integrity next launch.
+    # use `am kill`, not `am force-stop`: force-stop sets FLAG_STOPPED, and GMS then drops every
+    # future FCM broadcast to the app (FLAG_EXCLUDE_STOPPED_PACKAGES) until it is reopened by
+    # hand, silently breaking push. `am kill` frees the same cached verdict (kills the background
+    # process) without stranding the app in the stopped state, so push keeps working.
     for _pkg in $(grep -vE '^[[:space:]]*(#|$)' "$_ts/target.txt" 2>/dev/null | sed 's/[[:space:]]//g; s/[!?]*$//'); do
         case "$_pkg" in ''|*[!a-zA-Z0-9._]*) continue;; esac
         rm -rf "/data/data/$_pkg/cache/"* "/data/data/$_pkg/code_cache/"* 2>/dev/null
-        am force-stop "$_pkg" 2>/dev/null
+        am kill "$_pkg" 2>/dev/null
     done
     return 0
 }
