@@ -24,4 +24,4 @@ if ! "$nm" version >/dev/null 2>&1; then
     }
 fi
 "$nm" version >/dev/null 2>&1 || { loge "nomount driver still not responding; self-disabling"; touch "$MODDIR/disable"; exit 1; }
-logi "post-fs-data done; nomount driver active"
+logi "post-fs-data done; nomount driver active (v$("$nm" version 2>/dev/null | head -n 1))"

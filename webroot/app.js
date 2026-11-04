@@ -16,6 +16,7 @@ const HIDE_PKGS = [
   'com.dimonvideo.luckypatcher', 'ru.aaaaaaac.ljkjlk', 'moe.shizuku.privileged.api',
 ];
 const TABS = ['apps', 'spoof', 'keybox', 'system'];
+const LOG_TAIL = 200;   // how many recent log lines the inline viewer loads
 const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 const CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>';
 const EXT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>';
@@ -43,6 +44,7 @@ const I18N = {
     patchFetchOkPre: 'Fetched the latest patch date; tap ', patchFetchOkPost: ' to apply.', patchBad: 'Patch date must be YYYY-MM-01 or YYYY-MM-05.',
     patchSetOk: 'Patch date set', patchSetLine: d => `Set ${d}`,
     usbSection: 'USB debugging', adbSwLabel: 'ADB debugging', notifSection: 'Notifications', notifSwLabel: 'Fix Xiaomi notifications', strongSection: 'App visibility',
+    logSection: 'Logs', logShow: n => `View last ${n} log lines`, logHide: 'Hide logs', logExport: 'Export 3-day log', logEmpty: 'No logs yet.', logLoading: 'Loading logs…', logExportOk: 'Log exported',
     adbName: 'USB debugging', notifName: 'Xiaomi notification fix', on: n => `${n} enabled`, off: n => `${n} disabled`,
     flags: { spoof_system: 'Spoof system properties', spoof_utc: 'Spoof UTC properties', spoof_date: 'Spoof date properties', spoof_fingerprint: 'Spoof fingerprint properties', spoof_os_patch: 'Spoof OS security patch level', spoof_vendor_patch: 'Spoof vendor security patch level' },
     dgDiscardT: 'Discard unsaved changes?', dgDiscardB: 'Discard unsaved changes and refresh?', dgDiscardC: 'Discard & refresh',
@@ -73,6 +75,7 @@ const I18N = {
     patchFetchOkPre: 'Đã lấy ngày bản vá; nhấn ', patchFetchOkPost: ' để đặt.', patchBad: 'Ngày bản vá phải có dạng YYYY-MM-01 hoặc YYYY-MM-05.',
     patchSetOk: 'Đã đặt ngày bản vá', patchSetLine: d => `Đã đặt ${d}`,
     usbSection: 'USB debugging', adbSwLabel: 'ADB debugging', notifSection: 'Thông báo', notifSwLabel: 'Fix thông báo Xiaomi', strongSection: 'Ẩn ứng dụng',
+    logSection: 'Nhật ký', logShow: n => `Xem ${n} dòng log gần nhất`, logHide: 'Ẩn log', logExport: 'Xuất log 3 ngày gần nhất', logEmpty: 'Chưa có log.', logLoading: 'Đang tải log…', logExportOk: 'Đã xuất log',
     adbName: 'USB debugging', notifName: 'fix thông báo Xiaomi', on: n => `Đã bật ${n}`, off: n => `Đã tắt ${n}`,
     flags: { spoof_system: 'Spoof thông số hệ thống', spoof_utc: 'Spoof thông số UTC', spoof_date: 'Spoof thông số ngày', spoof_fingerprint: 'Spoof fingerprint', spoof_os_patch: 'Spoof mức bản vá bảo mật OS', spoof_vendor_patch: 'Spoof mức bản vá bảo mật vendor' },
     dgDiscardT: 'Bỏ thay đổi chưa lưu?', dgDiscardB: 'Bỏ các thay đổi chưa lưu để làm mới?', dgDiscardC: 'Bỏ và làm mới',
@@ -114,7 +117,8 @@ const ERR = {
   no_curl: { en: 'Device needs curl with TLS to fetch the Pixel bulletin.', vi: 'Thiết bị cần curl có TLS để lấy bản tin Pixel.' },
   bulletin_fail: { en: 'Could not fetch the Pixel bulletin.', vi: 'Không tải được bản tin Pixel.' },
   patch_fetch_fail: { en: 'Could not read the patch date from the Pixel bulletin.', vi: 'Không đọc được ngày bản vá từ bản tin Pixel.' },
-  patch_bad: { en: 'Invalid patch date.', vi: 'Ngày bản vá không hợp lệ.' }
+  patch_bad: { en: 'Invalid patch date.', vi: 'Ngày bản vá không hợp lệ.' },
+  export_fail: { en: 'Could not write the log file to storage.', vi: 'Không ghi được tệp log vào bộ nhớ.' }
 };
 const errText = raw => (ERR[raw] && ERR[raw][LANG]) || raw;
 
@@ -124,6 +128,7 @@ let dirty = false, busy = false, retry = false, savedScope, needsReboot = false,
 // when off (default), they use blacklist mode and only HIDE_PKGS is hidden from them
 let strongHide = false;
 let tab = 0, kbPick = '', kbFile = null, kbSet = '', dialogKind = null, toastTimer, curPull = 0, rebootGuard;
+let logOpen = false, logBusy = false;
 
 function section(text, name) {
   const start = text.indexOf('===' + name + '===');
@@ -447,6 +452,34 @@ async function toggleSys(id, action, label) {
   finally { el.disabled = false; }
 }
 
+// logs — tap the row to fetch the last LOG_TAIL lines; the export button writes a full
+// 3-day diagnostic bundle to shared storage so the user can send it back.
+async function loadLog() {
+  if (logBusy) return;
+  logBusy = true;
+  $('log-pre').textContent = L.logLoading;
+  try {
+    const out = (await run(`log ${LOG_TAIL}`, 'hard')).replace(/\n+$/, '');
+    $('log-pre').textContent = out || L.logEmpty;
+    $('log-view').scrollTop = $('log-view').scrollHeight;
+  } catch (error) { $('log-pre').textContent = error.message; }
+  finally { logBusy = false; }
+}
+function toggleLog() {
+  logOpen = !logOpen;
+  $('log-view').hidden = !logOpen;
+  $('log-toggle').classList.toggle('open', logOpen);
+  $('log-toggle-label').textContent = logOpen ? L.logHide : L.logShow(LOG_TAIL);
+  if (logOpen) loadLog();   // re-fetch on every open so the view is always fresh
+}
+async function exportLog() {
+  const b = $('log-export');
+  b.disabled = true;
+  try { const path = (await run('export-log', 'hard')).trim(); toast(L.logExportOk, true, path); }
+  catch (error) { toast(error.message, false); }
+  finally { b.disabled = false; }
+}
+
 // pull to refresh
 function setPull(h, animate) {
   const el = $('pull');
@@ -475,6 +508,8 @@ function applyLang() {
   $('patch-fetch').title = L.patchFetchTitle; $('patch-fetch').setAttribute('aria-label', L.patchFetchTitle);
   $('patch-apply').title = L.patchApplyBtn; $('patch-apply').setAttribute('aria-label', L.patchApplyBtn);
   [...$('nav').children].forEach((b, i) => b.textContent = L.nav[i]);
+  $('log-toggle-label').textContent = logOpen ? L.logHide : L.logShow(LOG_TAIL);
+  $('log-export').textContent = L.logExport;
   setKbText();
 }
 
@@ -488,6 +523,8 @@ $('save-btn').addEventListener('click', () => { if (!dirty && needsReboot && !bu
 $('adb-toggle').addEventListener('change', () => toggleSys('adb-toggle', 'adbset', L.adbName));
 $('notify-toggle').addEventListener('change', () => toggleSys('notify-toggle', 'notifyset', L.notifName));
 $('strong-toggle').addEventListener('change', () => { strongHide = $('strong-toggle').checked; markDirty(); });
+$('log-toggle').addEventListener('click', toggleLog);
+$('log-export').addEventListener('click', exportLog);
 $('kb-box').addEventListener('click', () => $('kb-file').click());
 $('kb-file').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) { kbFile = f; kbPick = f.name; setKbText(); } });
 $('kb-open').addEventListener('click', async () => { try { await run('open-keybox'); toast(L.kbOpenOk, true, L.kbOpenDetail); } catch (error) { toast(error.message, false); } });

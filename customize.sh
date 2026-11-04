@@ -10,6 +10,8 @@ LOGFILE="$MODPATH/install.log"
 step() { ui_print "- $1"; logi "$1"; }
 die()  { loge "$1"; abort "! $1"; }
 logi "install started (arch=$ARCH api=$API ksu=${KSU:-} apatch=${APATCH:-} ksu_ver=${KSU_VER_CODE:-})"
+logi "device: $(getprop ro.product.manufacturer) $(getprop ro.product.model) [$(getprop ro.product.device)] android $(getprop ro.build.version.release) kernel $(uname -r)"
+logi "firmware fp: $(getprop ro.build.fingerprint)"
 
 [ "$ARCH" = arm64 ] || die "arm64 only"
 [ "$API" -ge 29 ] || die "Android 10+ required"

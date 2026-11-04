@@ -11,25 +11,35 @@
 # never touches app DATA (that would wipe logins).
 # sourced by webroot/tricky-api.sh (after every save) and by customize.sh (on install).
 refresh_attestation() {
+    command -v logi >/dev/null 2>&1 || { logi() { :; }; }
     _ts=/data/adb/tricky_store
     rm -rf "$_ts/keys/"* 2>/dev/null
+    logi "refresh-attestation: cleared cached TrickyStore keys"
 
     # fresh DroidGuard attestation: drop its cache for every user, restart just that process
     for _d in /data/user/*/com.google.android.gms; do
         [ -d "$_d" ] && rm -rf "$_d/app_dg_cache/"* 2>/dev/null
     done
     _dg=$(pidof com.google.android.gms.unstable 2>/dev/null)
-    [ -n "$_dg" ] && kill $_dg 2>/dev/null
+    if [ -n "$_dg" ]; then
+        kill $_dg 2>/dev/null
+        logi "refresh-attestation: restarted DroidGuard (pid $_dg)"
+    else
+        logi "refresh-attestation: DroidGuard not running; cache dropped"
+    fi
 
     # target (banking) apps: clear cache + kill so they re-check integrity next launch.
     # use `am kill`, not `am force-stop`: force-stop sets FLAG_STOPPED, and GMS then drops every
     # future FCM broadcast to the app (FLAG_EXCLUDE_STOPPED_PACKAGES) until it is reopened by
     # hand, silently breaking push. `am kill` frees the same cached verdict (kills the background
     # process) without stranding the app in the stopped state, so push keeps working.
+    _n=0
     for _pkg in $(grep -vE '^[[:space:]]*(#|$)' "$_ts/target.txt" 2>/dev/null | sed 's/[[:space:]]//g; s/[!?]*$//'); do
         case "$_pkg" in ''|*[!a-zA-Z0-9._]*) continue;; esac
         rm -rf "/data/data/$_pkg/cache/"* "/data/data/$_pkg/code_cache/"* 2>/dev/null
         am kill "$_pkg" 2>/dev/null
+        _n=$((_n + 1))
     done
+    logi "refresh-attestation: cleared cache + killed $_n target app(s)"
     return 0
 }

@@ -9,6 +9,7 @@ LOG_TAG=spoof
 RESETPROP=/data/adb/ksu/bin/resetprop
 [ -x "$RESETPROP" ] || RESETPROP=/data/adb/ap/bin/resetprop
 [ -x "$RESETPROP" ] || RESETPROP=resetprop
+command -v "$RESETPROP" >/dev/null 2>&1 || logw "resetprop not found at expected paths; using '$RESETPROP'"
 
 # all switches default off; spoof.conf turns them on
 spoof_system=0; spoof_fingerprint=0; spoof_utc=0; spoof_date=0; spoof_os_patch=0; spoof_vendor_patch=0
@@ -118,12 +119,12 @@ patch_date() { # $1 = day-of-month suffix (01 for os, 05 for vendor)
 do_os_patch() { if_prop ro.build.version.security_patch "$(patch_date 01)"; }
 do_vendor_patch() { if_prop ro.vendor.build.security_patch "$(patch_date 05)"; }
 
-logi "spoof start (on:$(for k in spoof_system spoof_fingerprint spoof_utc spoof_date spoof_os_patch spoof_vendor_patch; do on "$k" && printf ' %s' "$k"; done))"
-on spoof_system && do_system
-on spoof_fingerprint && do_fingerprint
-on spoof_utc && do_utc
-on spoof_date && do_date
-on spoof_os_patch && do_os_patch
-on spoof_vendor_patch && do_vendor_patch
+logi "spoof start (resetprop=$RESETPROP; on:$(for k in spoof_system spoof_fingerprint spoof_utc spoof_date spoof_os_patch spoof_vendor_patch; do on "$k" && printf ' %s' "$k"; done))"
+on spoof_system && { do_system; logi "applied system properties"; }
+on spoof_fingerprint && { do_fingerprint; logi "applied fingerprint ($("$RESETPROP" ro.build.fingerprint))"; }
+on spoof_utc && { do_utc; logi "applied utc properties"; }
+on spoof_date && { do_date; logi "applied date properties"; }
+on spoof_os_patch && { do_os_patch; logi "applied os patch $(patch_date 01)"; }
+on spoof_vendor_patch && { do_vendor_patch; logi "applied vendor patch $(patch_date 05)"; }
 "$RESETPROP" -c --force 2>/dev/null || "$RESETPROP" -c 2>/dev/null || true
 logi "spoof done"

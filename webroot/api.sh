@@ -4,16 +4,24 @@ set -eu
 module=/data/adb/modules/dont_mind_me
 [ -f "$module/module.prop" ] || { echo 'not_installed' >&2; exit 1; }
 
+# log each HMA action + outcome to the module logfile (never stdout, so the WebUI's
+# stdout parsing stays intact). fail() records the short code then emits it on stderr.
+logi() { :; }; logw() { :; }; loge() { :; }
+LOG_TAG=webui
+[ -f "$module/log.sh" ] && . "$module/log.sh"
+fail() { loge "hma $* failed"; echo "$1" >&2; exit 1; }
+
 dir=
 for candidate in /data/misc/hide_my_applist_*; do
     [ -f "$candidate/status.json" ] || continue
-    [ -z "$dir" ] || { echo 'hma_multi' >&2; exit 1; }
+    [ -z "$dir" ] || fail hma_multi
     dir=$candidate
 done
-[ -n "$dir" ] || { echo 'hma_no_data' >&2; exit 1; }
-grep -q '"workMode":1' "$dir/status.json" || { echo 'hma_not_ready' >&2; exit 1; }
+[ -n "$dir" ] || fail hma_no_data
+grep -q '"workMode":1' "$dir/status.json" || fail hma_not_ready
 
 config=$dir/config.json
+logi "hma action='${1:-}' dir='$dir'"
 case "${1:-}" in
     bundle)
         # one round-trip for the WebUI's initial load: user-app list plus the three
@@ -34,22 +42,23 @@ case "${1:-}" in
         ;;
     save)
         payload=${2:-}
-        case "$payload" in ''|*[!a-zA-Z0-9+/=]*) echo 'bad_input' >&2; exit 1;; esac
-        [ "${#payload}" -le 131072 ] || { echo 'input_too_big' >&2; exit 1; }
-        tmp=$(mktemp "$dir/.hma-webui-XXXXXX") || exit 1
+        case "$payload" in ''|*[!a-zA-Z0-9+/=]*) fail bad_input;; esac
+        [ "${#payload}" -le 131072 ] || fail input_too_big
+        tmp=$(mktemp "$dir/.hma-webui-XXXXXX") || fail save_fail
         trap 'rm -f "$tmp"' EXIT HUP INT TERM
-        printf '%s' "$payload" | base64 -d > "$tmp" || { echo 'decode_fail' >&2; exit 1; }
-        [ -s "$tmp" ] || { echo 'empty_config' >&2; exit 1; }
-        grep -q '"configVersion":93' "$tmp" && grep -q '"scope":{' "$tmp" || { echo 'bad_hma' >&2; exit 1; }
+        printf '%s' "$payload" | base64 -d > "$tmp" || fail decode_fail
+        [ -s "$tmp" ] || fail empty_config
+        grep -q '"configVersion":93' "$tmp" && grep -q '"scope":{' "$tmp" || fail bad_hma
         chown 1000:1000 "$tmp"
         chmod 600 "$tmp"
-        restorecon "$tmp" || { echo 'label_fail' >&2; exit 1; }
+        restorecon "$tmp" || fail label_fail
         if [ -f "$config" ]; then
-            cp -p "$config" "$config.bak" || { echo 'backup_fail' >&2; exit 1; }
+            cp -p "$config" "$config.bak" || fail backup_fail
         fi
-        mv -f "$tmp" "$config" || { echo 'save_fail' >&2; exit 1; }
+        mv -f "$tmp" "$config" || fail save_fail
         trap - EXIT HUP INT TERM
+        logi "hma config saved ($(wc -c < "$config" 2>/dev/null) bytes)"
         printf '%s\n' 'ok'
         ;;
-    *) echo 'bad_action' >&2; exit 1;;
+    *) fail bad_action;;
 esac
