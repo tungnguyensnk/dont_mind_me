@@ -41,7 +41,11 @@ else
 fi
 
 nm="$MODDIR/bin/nm"
-"$nm" version >/dev/null 2>&1 || exit 1
+nmver=$("$nm" version 2>/dev/null | sed -n '1s/^\([0-9][0-9]*\).*/\1/p')
+[ -n "$nmver" ] || exit 1
+# v22 changed the rule header; drivers v20-21 need the v2.1 cli
+[ "$nmver" -ge 22 ] || nm="$MODDIR/bin/nm21"
+logi "nomount driver v$nmver, cli $(basename "$nm")"
 
 resetprop=/data/adb/ksu/bin/resetprop
 [ -x "$resetprop" ] || resetprop=/data/adb/ap/bin/resetprop

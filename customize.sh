@@ -23,6 +23,7 @@ logi "firmware fp: $(getprop ro.build.fingerprint)"
 # not aborted on — their functions are all bundled into this module now
 
 set_perm "$MODPATH/bin/nm" 0 0 0755
+set_perm "$MODPATH/bin/nm21" 0 0 0755
 set_perm "$MODPATH/bin/lkmloader" 0 0 0755
 set_perm "$MODPATH/bin/hbd" 0 0 0755
 nm="$MODPATH/bin/nm"
@@ -40,20 +41,21 @@ if [ -z "$version" ] || grep -q '^nomount ' /proc/modules; then
     logi "resolving nomount driver: kmi=${kmi:-?} kernel=$kernel -> $(basename "$ko")"
     # only arm64 KMI drivers are bundled; add a matching driver file for a new kernel.
     [ -f "$ko" ] || die "nomount driver unavailable for this kernel ($(basename "$ko"))"
-    if [ -z "$version" ]; then
+    if grep -q '^nomount ' /proc/modules; then
+        # another nomount LKM (any version) is loaded; the bundled driver replaces it on reboot
+        step "existing nomount kernel module detected; staging driver for reboot"
+    else
         "$MODPATH/bin/lkmloader" "$ko" || die "failed to load the nomount driver"
         version=$("$nm" version 2>/dev/null)
         [ -n "$version" ] || die "nomount driver is not responding after load"
-    else
-        step "existing nomount kernel module detected; staging driver for reboot"
     fi
     current=$(printf '%s\n' "$version" | sed -n '1s/^\([0-9][0-9]*\).*/\1/p')
-    [ -n "$current" ] && [ "$current" -ge 22 ] || die "nomount driver v22+ required (found ${current:-none})"
     mv "$ko" "$MODPATH/lkm/nomount.ko" || die "cannot stage driver for reboot"
-    logi "nomount driver v$current staged for reboot"
+    logi "nomount driver staged for reboot (running v${current:-none})"
 else
+    # built-in driver can't be replaced: v22+ uses bin/nm, v20-21 the v2.1 cli bin/nm21
     current=$(printf '%s\n' "$version" | sed -n '1s/^\([0-9][0-9]*\).*/\1/p')
-    [ -n "$current" ] && [ "$current" -ge 22 ] || die "nomount driver v22+ required (found ${current:-none})"
+    [ -n "$current" ] && [ "$current" -ge 20 ] || die "nomount driver v20+ required (found ${current:-none})"
     rm -rf "$MODPATH/lkm"
     logi "nomount driver v$current already loaded"
 fi
@@ -165,5 +167,5 @@ for d in /data/adb/modules/*/; do
         touch "$d/disable" && step "disabled conflicting module: $mid"
     fi
 done
-step "Don't mind me v$current staged (HMA, Tricky Store, nomount, property spoof)"
+step "Don't mind me $(sed -n 's/^version=//p' "$MODPATH/module.prop") staged (HMA, Tricky Store, nomount, property spoof)"
 logi "install finished"
